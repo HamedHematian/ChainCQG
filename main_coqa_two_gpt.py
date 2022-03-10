@@ -13,7 +13,7 @@ from torch.nn.utils.rnn import pad_sequence
 
 from transformers import GPT2LMHeadModel, GPT2Tokenizer, AdamW, get_linear_schedule_with_warmup, set_seed
 
-from torchfly.training.arguments import BaseArguments
+import argparse
 
 import os, sys
 sys.path.append(os.path.abspath('..'))
@@ -21,37 +21,59 @@ sys.path.append(os.path.abspath('../..'))
 
 from utils import *
 
+parser = argparse.ArgumentParser(description="ChainCQG")
 
-args = BaseArguments() 
-args.add_argument("--model_size",
-                  type=str,
-                  help="Model size")
+parser.add_argument("--random-seed",
+                    type=int,
+                    default=2020)
 
-args.add_argument("--dataset_name",
-                  type=str,
-                  help="dataset to use")
+parser.add_argument("--warmup-steps",
+                    type=int)
 
-args.add_argument("--random_seed",
-                  type=int,
-                  help="random_seed")
+parser.add_argument("--learning-rate",
+                    type=float)
 
-args.add_argument("--use_all_loss",
-                          action='store_true',
-                          help="Use base model or not")
-args.add_argument("--loss_discount",
-                  type=float,
-                  default=1.0,
-                  help="the loss discount for turn before the final two turn, work when use_all_loss=True")
+parser.add_argument("--batch-size",
+                    type=int)
 
-args = args.parse_args()
+parser.add_argument("--gradient-accumulation-steps",
+                    type=int)
+
+parser.add_argument("--num-train-epochs",
+                    type=int)
+
+parser.add_argument("--do-valid",
+                    action="store_true")
+
+parser.add_argument("--model-size",
+                    type=str,
+                    help="Model size")
+
+parser.add_argument("--dataset-name",
+                    type=str,
+                    help="dataset to use")
+
+parser.add_argument("--use-all-loss",
+                    action='store_true',
+                    help="Use base model or not")
+
+parser.add_argument("--loss-discount",
+                    type=float,
+                    default=1.0,
+                    help="the loss discount for turn before the final two turn, work when use_all_loss=True")
+
+parser.add_argument("--fp16",
+                    action="store_true")
+
+args = parser.parse_args()
 
 set_seed(args.random_seed)
 
+tokenizer_dir = "data/coqa/tokenizer"
+tokenizer = GPT2Tokenizer.from_pretrained(tokenizer_dir)
+
 # init all datasets
 [train_dataset_dir, val_dataset_dir, test_dataset_dir] = get_dataset_dir_by_name(args.dataset_name)
-train_dataset_dir = "../" + train_dataset_dir
-val_dataset_dir = "../" + val_dataset_dir
-test_dataset_dir = "../" + test_dataset_dir
 
 train_data = torch.load(train_dataset_dir)
 #train_data = train_data[:20]
@@ -61,16 +83,10 @@ test_data = torch.load(test_dataset_dir)
 
 
 class TwoGPTDataset(Dataset):
-    def __init__(self, data, tokenizer):
+    def __init__(self, data):
         self.data = data
-        self.tokenizer = tokenizer
-        # cancel it
-        # self.tokenizer.max_len = 1500
-        # tokenizer weird behavior
-        self.turn_ending = [628, 198]
         
         self.__process__()
-        # tokenizer.encode("\n\n\n") return [], but tokenizer.decode([628, 198]) return "\n\n\n"
         
     def __len__(self):
         return len(self.data)
@@ -78,41 +94,36 @@ class TwoGPTDataset(Dataset):
     def __process__(self):
         self.processed_data = []
         for one in self.data:
-            one_dial_tokens = [tokenizer.encode(item) + self.turn_ending for item in one]
+            one_dial_tokens = one
             one_role_ids = [idx%2 for idx in range(len(one_dial_tokens))]
             self.processed_data.append([one_role_ids, one_dial_tokens])
             
     def __getitem__(self, index):
-        dial_tokens = [tokenizer.encode(item) + self.turn_ending for item in self.data[index]]
-        # since we use two GPT, it maybe not necessary to use role_id
-        # role_ids = [0 if item[0] == 32 else 1 for item in dial_tokens]
-        # return role_ids, dial_tokens
-        #role_ids = [idx%2 for idx in range(len(dial_tokens))]
         [role_ids, dial_tokens] = self.processed_data[index]
+        #rold_ids = torch.Tensor(role_ids)
+        #dial_tokens = torch.Tensor(dial_tokens)
         return role_ids, dial_tokens
-        
+    
     def collate(self, unpacked_data):
         return unpacked_data
 
-# load the tokenizer
-tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-train_dataset = TwoGPTDataset(train_data, tokenizer)
-val_dataset = TwoGPTDataset(val_data, tokenizer)
-test_dataset = TwoGPTDataset(test_data, tokenizer)
+train_dataset = TwoGPTDataset(train_data)
+val_dataset = TwoGPTDataset(val_data)
+test_dataset = TwoGPTDataset(test_data)
 
 train_dataloader = DataLoader(dataset=train_dataset, 
                               shuffle=True, 
-                              batch_size=args.batch_size, 
+                              batch_size=args.batch_size,
                               collate_fn=train_dataset.collate)
 
 val_dataloader = DataLoader(dataset=val_dataset, 
                             shuffle=False, 
-                            batch_size=args.batch_size, 
+                            batch_size=args.batch_size,
                             collate_fn=train_dataset.collate)
 
 test_dataloader = DataLoader(dataset=test_dataset, 
                             shuffle=False, 
-                            batch_size=args.batch_size, 
+                            batch_size=args.batch_size,
                             collate_fn=train_dataset.collate)
 
 
@@ -126,6 +137,9 @@ else:
 
 model_A = GPT2LMHeadModel.from_pretrained(model_type)
 model_B = GPT2LMHeadModel.from_pretrained(model_type)
+
+model_A.resize_token_embeddings(len(tokenizer))
+model_B.resize_token_embeddings(len(tokenizer))
 
 device = torch.device("cuda")
 model_A = model_A.to(device)
@@ -204,14 +218,16 @@ def train_one_iter(batch, update_count, fp16=False):
     role_ids, dialog_tokens = batch
     dial_inputs = [torch.LongTensor(item).unsqueeze(0).to(device) for item in dialog_tokens]
     
-    past = None
+    past_key_values = None
     all_logits = []
     
     for turn_num, dial_turn_inputs in enumerate(dial_inputs):
         
         if role_ids[turn_num] == 0:
             # breakpoint()
-            logits, past = model_A(dial_turn_inputs, past=past)
+            output = model_A(dial_turn_inputs, past_key_values=past_key_values)
+            logits = output.logits
+            past_key_values = output.past_key_values
 
             if args.use_all_loss:
                 all_logits.append(logits)
@@ -219,7 +235,10 @@ def train_one_iter(batch, update_count, fp16=False):
                 all_logits.append(logits)
         else:
             # breakpoint()
-            logits, past = model_B(dial_turn_inputs, past=past)
+            output = model_B(dial_turn_inputs, past_key_values=past_key_values)
+            logits = output.logits
+            past_key_values = output.past_key_values
+            
             if args.use_all_loss:
                 all_logits.append(logits)
             elif turn_num == len(dial_inputs) - 1 or turn_num == len(dial_inputs) - 2:
@@ -269,17 +288,22 @@ def validate(dataloader):
             role_ids, dialog_tokens = batch[0]
             dial_inputs = [torch.LongTensor(item).unsqueeze(0).to(device) for item in dialog_tokens]
 
-            past = None
+            past_key_values = None
             all_logits = []
 
             for turn_num, dial_turn_inputs in enumerate(dial_inputs):
                 if role_ids[turn_num] == 0:
-                    logits, past = model_A(dial_turn_inputs, past=past)
+                    output = model_A(dial_turn_inputs, past_key_values=past_key_values)
+                    logits = output.logits
+                    past_key_values = output.past_key_values
                     # all_logits.append(logits)
                     if turn_num == len(dial_inputs) - 2:
                         all_logits.append(logits)
                 else:
-                    logits, past = model_B(dial_turn_inputs, past=past)
+                    output = model_B(dial_turn_inputs, past_key_values=past_key_values)
+                    logits = output.logits
+                    past_key_values = output.past_key_values
+                    
                     if turn_num == len(dial_inputs) - 1:
                         all_logits.append(logits)
                         length_last_question = logits.shape[1]
