@@ -7,6 +7,7 @@ import json
 import copy
 import torch
 import torch.nn as nn
+from torchsummary import summary as summary
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence
@@ -96,7 +97,7 @@ args = parser.parse_args()
 
 set_seed(args.random_seed)
 
-tokenizer_dir = "data/coqa/tokenizer"
+tokenizer_dir = f"data/coqa/tokenizer_{args.model_size}"
 tokenizer = GPT2Tokenizer.from_pretrained(tokenizer_dir)
 
 # init all datasets
@@ -456,7 +457,6 @@ if args.do_train:
 
     update_count = 0
     progress_bar = tqdm.tqdm
-    start = time.time()
     old_ppl = -float('Inf')
 
     for ep in range(args.num_train_epochs):
@@ -465,6 +465,8 @@ if args.do_train:
         pbar = progress_bar(train_dataloader)
         model_A.train()
         model_B.train()
+        
+        start = time.time()
 
         for batch in pbar:
             batch = batch[0]
@@ -489,6 +491,9 @@ if args.do_train:
 
                 # show progress
                 pbar.set_postfix(loss=record_loss, perplexity=perplexity)
+                
+        end = time.time()
+        print("Train time:", end-start)
 
         "Evaluation"
         model_A.eval()

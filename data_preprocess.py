@@ -20,6 +20,10 @@ parser.add_argument("--model-name",
                   type=str,
                   help="pretrained model name for tokenizer")
 
+parser.add_argument("--model-size",
+                  type=str,
+                  help="Model size")
+
 parser.add_argument("--max-seq-length",
                   type=int,
                   default=512,
@@ -36,7 +40,7 @@ tokenizer = GPT2Tokenizer.from_pretrained(args.model_name)
 special_tokens_dict = {'additional_special_tokens':['<HL>', '</HL>', '<SEP>']}
 tokenizer.add_special_tokens(special_tokens_dict)
 
-tokenizer_dir = "data/coqa/tokenizer"
+tokenizer_dir = f"data/coqa/tokenizer_{args.model_size}"
 os.makedirs(tokenizer_dir, exist_ok=True)
 
 print(f"Save the tokenizer into {tokenizer_dir}...")
@@ -80,6 +84,8 @@ def get_features(data_file, tokenizer):
             backward_tokens = tokenizer.encode(backward_context)
 
             answer_text = answer["input_text"]
+            if answer_text == "unknown":
+                continue
             question_text = question["input_text"]
 
             answer_tokens = tokenizer.encode(answer_text)

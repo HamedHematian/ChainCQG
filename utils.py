@@ -109,6 +109,10 @@ def get_dataset_dir_by_name(dataset_name):
         train_dataset_dir = "data/coqa/train_coqa_two_gpt.pkl"
         val_dataset_dir = "data/coqa/dev_coqa_two_gpt.pkl"
         test_dataset_dir = "data/coqa/test_coqa_two_gpt.pkl"
+    elif dataset_name == "coqa_two_gpt_large":
+        train_dataset_dir = "data/coqa/train_coqa_two_gpt_large.pkl"
+        val_dataset_dir = "data/coqa/dev_coqa_two_gpt_large.pkl"
+        test_dataset_dir = "data/coqa/test_coqa_two_gpt_large.pkl"
     
     elif dataset_name.startswith("coqa_two_gpt_mask"):
         train_dataset_dir = "data/coqa/train_" + dataset_name + ".pkl"
