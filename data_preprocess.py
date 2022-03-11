@@ -47,22 +47,11 @@ tokenizer.save_pretrained(tokenizer_dir)
 train_data_file = "data/coqa/coqa-train-wikipedia.json"
 val_data_file = "data/coqa/coqa-dev-wikipedia.json"
 
-def seed_everything(seed):
-    random.seed(seed)
-    os.environ["PYTHONHASHSEED"] = str(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-seed = 2020
-seed_everything(seed)
-
 def get_features(data_file, tokenizer):
     hl_start_token_id = tokenizer.encode("<HL>")
     hl_end_token_id = tokenizer.encode("</HL>")
     sep_token_id = tokenizer.encode("<SEP>")
+    bos_token_id = tokenizer.encode(tokenizer.bos_token)
     eos_token_id = tokenizer.encode(tokenizer.eos_token)
     
     with open(data_file, "r") as fin:
@@ -116,12 +105,6 @@ def get_features(data_file, tokenizer):
             PH = forward_tokens + hl_start_token_id + rationale_tokens + hl_end_token_id + backward_tokens
             
             first_input = PH + sep_token_id + first_answer + eos_token_id
-            if len(first_input) > args.max_seq_length:
-                print(max_passage_length)
-                print(len(forward_tokens))
-                print(len(backward_tokens))
-                print(len(rationale_tokens))
-                print(len(first_answer))
             assert len(first_input) <= args.max_seq_length, f"len:{len(first_input)}"
             feature.append(first_input)
             
@@ -129,11 +112,11 @@ def get_features(data_file, tokenizer):
                 if turn_id != 0:
                     answer_tokens = a + eos_token_id
                     feature.append(answer_tokens)
-                question_tokens = q + eos_token_id
+                question_tokens = bos_token_id + q + eos_token_id
                 feature.append(question_tokens)
                 
             if fid < 3:
-                print(first_input)
+                print(tokenizer.decode(feature[-1]))
             fid += 1
             features.append(feature)
 
@@ -141,7 +124,7 @@ def get_features(data_file, tokenizer):
 
 train_features = get_features(train_data_file, tokenizer)
 valid_features = get_features(val_data_file, tokenizer)
-        
+  
 torch.save(train_features, train_dataset_dir)
 torch.save(valid_features, val_dataset_dir)
 torch.save(valid_features, test_dataset_dir)

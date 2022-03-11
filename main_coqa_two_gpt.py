@@ -11,7 +11,8 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence
 
-from transformers import GPT2LMHeadModel, GPT2Tokenizer, AdamW, get_linear_schedule_with_warmup, set_seed
+from gpt2 import GPT2LMHeadModel
+from transformers import GPT2Tokenizer, AdamW, get_linear_schedule_with_warmup, set_seed
 
 import argparse
 
@@ -42,8 +43,34 @@ parser.add_argument("--gradient-accumulation-steps",
 parser.add_argument("--num-train-epochs",
                     type=int)
 
+parser.add_argument("--do-train",
+                    action="store_true")
+
 parser.add_argument("--do-valid",
                     action="store_true")
+
+parser.add_argument("--do-predict",
+                    action="store_true")
+
+parser.add_argument("--checkpoint-dir",
+                    type=str,
+                    default=None)
+
+parser.add_argument("--max-target-length",
+                    type=int,
+                    default=64)
+
+parser.add_argument("--top-p",
+                    type=float,
+                    default=0.2)
+
+parser.add_argument("--top-k",
+                    type=int,
+                    default=400)
+
+parser.add_argument("--temper",
+                    type=float,
+                    default=0.7)
 
 parser.add_argument("--model-size",
                     type=str,
@@ -132,6 +159,8 @@ if args.model_size == "small":
     model_type = "gpt2" 
 elif args.model_size == "medium":
     model_type = "gpt2-medium"
+elif args.model_size == "large":
+    model_type = "gpt2-large"
 else:
     raise NotImplementedError()
 
@@ -222,7 +251,6 @@ def train_one_iter(batch, update_count, fp16=False):
     all_logits = []
     
     for turn_num, dial_turn_inputs in enumerate(dial_inputs):
-        
         if role_ids[turn_num] == 0:
             # breakpoint()
             output = model_A(dial_turn_inputs, past_key_values=past_key_values)
@@ -325,105 +353,164 @@ def validate(dataloader):
         print(f"Epcoh {ep} Validation Perplexity: {np.mean(total_ppl)} Variance: {np.var(total_ppl)}")
         
         return np.mean(total_ppl)
-
-criterion = SequenceCrossEntropyLoss()
-
-# make Checkpoint dir
-if args.model_size == "small":
-    _checkpoint_dir = args.dataset_name + "_small_Checkpoint"
-elif args.model_size == "medium":
-    _checkpoint_dir = args.dataset_name + "_medium_Checkpoint"
-elif args.model_size == "large":
-    _checkpoint_dir = args.dataset_name + "_large_Checkpoint"
-
-
-for i in range(1, 10):
-    temp = _checkpoint_dir + "_" + str(i)
-    if not os.path.isdir(temp):
-        args.checkpoint_dir = temp
-        break
-
-os.makedirs(args.checkpoint_dir, exist_ok=False)
-
-print(dict_to_text(args.__dict__))
-
-# store config for each checkpoint folder
-config_loc = args.checkpoint_dir + "/config.json"
-config = copy.deepcopy(args.__dict__)
-
-with open(config_loc, "w") as f:
-    json.dump(config, f, indent=4)
-
-# define hyper-parameters
-num_train_optimization_steps = num_train_optimization_steps = len(train_dataset) * args.num_train_epochs // args.batch_size // args.gradient_accumulation_steps
-
-param_optimizer = list(model_A.named_parameters()) + list(model_B.named_parameters())
-no_decay = ['bias', 'ln', 'LayerNorm.weight']
-optimizer_grouped_parameters = [
-    {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
-    {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
-    ]
-
-
-optimizer = AdamW(optimizer_grouped_parameters, 
-                  lr=args.learning_rate,
-                  eps=1e-06)
-
-scheduler = get_linear_schedule_with_warmup(optimizer,
-                                            num_warmup_steps=args.warmup_steps,
-                                            num_training_steps=num_train_optimization_steps)
-
-
-os.makedirs("models", exist_ok=True)
-
-
-update_count = 0
-progress_bar = tqdm.tqdm
-start = time.time()
-old_ppl = -float('Inf')
-
-for ep in range(args.num_train_epochs):
-
-    "Training"
-    pbar = progress_bar(train_dataloader)
-    model_A.train()
-    model_B.train()
     
-    for batch in pbar:
-        batch = batch[0]
-        
-        # without relative position, we skip dialogs
-        #
-        # if sum([len(item) for item in batch[1]]) > 1024:
-        #   continue
-        
-        if sum([len(item) for item in batch[1]]) > 1024:
-            continue
-            
-        record_loss, perplexity = train_one_iter(batch, update_count, fp16=args.fp16)
-        
-        update_count += 1
-
-        if update_count % args.gradient_accumulation_steps == args.gradient_accumulation_steps - 1:
-            # update for gradient accumulation
-            optimizer.step()
-            scheduler.step()
-            optimizer.zero_grad()
-            
-            # speed measure
-            end = time.time()
-            speed = args.batch_size * args.gradient_accumulation_steps / (end - start)
-            start = end
-            
-            # show progress
-            pbar.set_postfix(loss=record_loss, perplexity=perplexity, speed=speed)
-
-    "Evaluation"
+def predict(dataloader):
     model_A.eval()
     model_B.eval()
-    ppl = validate(val_dataloader)
+    progress_bar = tqdm.tqdm
+    pbar = progress_bar(dataloader)
     
-    # save the model for later use
-    filepath = os.path.join(args.checkpoint_dir, f"model_iter_{update_count}.pth")
-    torch.save([model_A.state_dict(), model_B.state_dict()], filepath)
-    print("saving at {}".format(filepath))
+    bos_token_id = tokenizer.encode(tokenizer.bos_token)[0]
+    eos_token_id = tokenizer.encode(tokenizer.eos_token)[0]
+    
+    results = []
+    for batch in pbar:
+
+        if sum([len(item) for item in batch[0][1]]) > 1024:
+            continue
+            
+        role_ids, dialog_tokens = batch[0]
+        dial_inputs = [torch.LongTensor(item).unsqueeze(0).to(device) for item in dialog_tokens]
+
+        past_key_values = None
+
+        for turn_num, dial_turn_inputs in enumerate(dial_inputs):
+            if turn_num == len(dial_inputs)-1:
+                break
+            if role_ids[turn_num] == 0:
+                output = model_A(dial_turn_inputs, past_key_values=past_key_values)
+                past_key_values = output.past_key_values
+            else:
+                output = model_B(dial_turn_inputs, past_key_values=past_key_values)
+                past_key_values = output.past_key_values
+        
+        output = model_B.generate(input_ids=torch.LongTensor([[bos_token_id]]).to(device),
+                                  past_key_values=past_key_values,
+                                  pad_token_id=eos_token_id,
+                                  bos_token_id=bos_token_id,
+                                  eos_token_id=eos_token_id,
+                                  do_sample=True,
+                                  max_length=args.max_target_length,
+                                  top_p=args.top_p,
+                                  top_k=args.top_k,
+                                  temperature=args.temper)
+        
+        pred = tokenizer.decode(output[0], skip_special_tokens=True)
+        label = tokenizer.decode(dial_inputs[-1][0].tolist(), skip_special_tokens=True)
+        results.append({"result": pred, "label": label})  
+
+    return results
+
+if args.do_train:
+    
+    criterion = SequenceCrossEntropyLoss()
+
+    # make Checkpoint dir
+    if args.model_size == "small":
+        _checkpoint_dir = args.dataset_name + "_small_Checkpoint"
+    elif args.model_size == "medium":
+        _checkpoint_dir = args.dataset_name + "_medium_Checkpoint"
+    elif args.model_size == "large":
+        _checkpoint_dir = args.dataset_name + "_large_Checkpoint"
+
+
+    for i in range(1, 10):
+        temp = _checkpoint_dir + "_" + str(i)
+        if not os.path.isdir(temp):
+            args.checkpoint_dir = temp
+            break
+
+    os.makedirs(args.checkpoint_dir, exist_ok=False)
+
+    print(dict_to_text(args.__dict__))
+
+    # store config for each checkpoint folder
+    config_loc = args.checkpoint_dir + "/config.json"
+    config = copy.deepcopy(args.__dict__)
+
+    with open(config_loc, "w") as f:
+        json.dump(config, f, indent=4)
+
+    # define hyper-parameters
+    num_train_optimization_steps = num_train_optimization_steps = len(train_dataset) * args.num_train_epochs // args.batch_size // args.gradient_accumulation_steps
+
+    param_optimizer = list(model_A.named_parameters()) + list(model_B.named_parameters())
+    no_decay = ['bias', 'ln', 'LayerNorm.weight']
+    optimizer_grouped_parameters = [
+        {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
+        {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+        ]
+
+
+    optimizer = AdamW(optimizer_grouped_parameters, 
+                      lr=args.learning_rate,
+                      eps=1e-06)
+
+    scheduler = get_linear_schedule_with_warmup(optimizer,
+                                                num_warmup_steps=args.warmup_steps,
+                                                num_training_steps=num_train_optimization_steps)
+
+
+    os.makedirs("models", exist_ok=True)
+
+
+    update_count = 0
+    progress_bar = tqdm.tqdm
+    start = time.time()
+    old_ppl = -float('Inf')
+
+    for ep in range(args.num_train_epochs):
+
+        "Training"
+        pbar = progress_bar(train_dataloader)
+        model_A.train()
+        model_B.train()
+
+        for batch in pbar:
+            batch = batch[0]
+
+            # without relative position, we skip dialogs
+            #
+            # if sum([len(item) for item in batch[1]]) > 1024:
+            #   continue
+
+            if sum([len(item) for item in batch[1]]) > 1024:
+                continue
+
+            record_loss, perplexity = train_one_iter(batch, update_count, fp16=args.fp16)
+
+            update_count += 1
+
+            if update_count % args.gradient_accumulation_steps == args.gradient_accumulation_steps - 1:
+                # update for gradient accumulation
+                optimizer.step()
+                scheduler.step()
+                optimizer.zero_grad()
+
+                # show progress
+                pbar.set_postfix(loss=record_loss, perplexity=perplexity)
+
+        "Evaluation"
+        model_A.eval()
+        model_B.eval()
+        ppl = validate(val_dataloader)
+
+        # save the model for later use
+        filepath = os.path.join(args.checkpoint_dir, f"model_iter_{update_count}.pth")
+        torch.save([model_A.state_dict(), model_B.state_dict()], filepath)
+        print("saving at {}".format(filepath))
+        
+if args.do_predict:
+    if not args.do_train:
+        model_files = [f for f in os.listdir(args.checkpoint_dir) if f.startswith("model_iter_")]
+        model_file = os.path.join(args.checkpoint_dir, sorted(model_files, reverse=True)[0])
+
+        [model_A_state, model_B_state] = torch.load(model_file)
+        model_A.load_state_dict(model_A_state)
+        model_B.load_state_dict(model_B_state)
+    
+    results = predict(test_dataloader)
+    prediction_file = os.path.join(args.checkpoint_dir, "predictions.json")
+    print("saving result at {}.".format(prediction_file))
+    with open(prediction_file, "w") as fout:
+        json.dump(results, fout, indent=4)
