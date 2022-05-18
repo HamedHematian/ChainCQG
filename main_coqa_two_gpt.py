@@ -12,8 +12,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence
 
-from gpt2 import GPT2LMHeadModel
-from transformers import GPT2Tokenizer, AdamW, get_linear_schedule_with_warmup, set_seed
+from transformers import GPT2LMHeadModel, GPT2Tokenizer, AdamW, get_linear_schedule_with_warmup, set_seed
 
 import argparse
 
@@ -97,6 +96,7 @@ args = parser.parse_args()
 
 set_seed(args.random_seed)
 
+
 tokenizer_dir = f"data/coqa/tokenizer_{args.model_size}"
 tokenizer = GPT2Tokenizer.from_pretrained(tokenizer_dir)
 
@@ -108,6 +108,33 @@ train_data = torch.load(train_dataset_dir)
 val_data = torch.load(val_dataset_dir)
 #val_data = val_data[:20]
 test_data = torch.load(test_dataset_dir)
+
+# drive prefix 
+drive_prefix = 'drive/MyDrive/CQG/'
+drive_checkpoint_dir = 'Checkpoint/'
+drive_log_dir = 'Log/'
+max_checkpoint_2_keep = 4
+
+# check if drive is accessible
+try:
+   with open(os.path.join(drive_prefix, drive_log_dir, 'test.txt'), 'r') as f:
+      pass
+except:
+  print('No Access to Drive')
+  exit()
+
+# check the checkpoints drive
+checkpoint_files = os.listdir(os.path.join(drive_prefix, drive_checkpoint_dir))
+if len(checkpoint_files) == 0:
+  checkpoint_available = False
+  print('No Checkpoint Found, Training from Begining')
+else:
+  checkpoint_available = True
+  assert len(checkpoint_files) >= 2, 'checkpoints are messed up'
+
+if checkpoint_available:
+  current_checkpoint = sorted(checkpoint_files, reverse=True)[:2]
+  current_checkpoint = map(lambda x: os.path.join(drive_prefix, drive_checkpoint_dir, x), current_checkpoint)
 
 
 class TwoGPTDataset(Dataset):
@@ -156,6 +183,7 @@ test_dataloader = DataLoader(dataset=test_dataset,
 
 
 # load the model
+
 if args.model_size == "small":
     model_type = "gpt2" 
 elif args.model_size == "medium":
@@ -167,9 +195,15 @@ else:
 
 model_A = GPT2LMHeadModel.from_pretrained(model_type)
 model_B = GPT2LMHeadModel.from_pretrained(model_type)
-
 model_A.resize_token_embeddings(len(tokenizer))
 model_B.resize_token_embeddings(len(tokenizer))
+
+if checkpoint_available:
+  model_A_state_dict = torch.load(current_checkpoint[0])
+  model_B_state_dict = torch.load(current_checkpoint[1])
+  model_A.load_state_dict(model_A_state_dict)
+  model_B.load_state_dict(model_B_state_dict)
+  print('checkpoint weights have been loaded')
 
 device = torch.device("cuda")
 model_A = model_A.to(device)
