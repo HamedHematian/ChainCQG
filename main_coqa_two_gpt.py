@@ -113,7 +113,8 @@ test_data = torch.load(test_dataset_dir)
 drive_prefix = 'drive/MyDrive/CQG/'
 drive_checkpoint_dir = 'Checkpoint/'
 drive_log_dir = 'Log/'
-max_checkpoint_2_keep = 4
+max_checkpoint_to_keep = 3
+save_each_k_samples = 20000
 
 # check if drive is accessible
 try:
@@ -130,10 +131,11 @@ if len(checkpoint_files) == 0:
   print('No Checkpoint Found, Training from Begining')
 else:
   checkpoint_available = True
-  assert len(checkpoint_files) >= 2, 'checkpoints are messed up'
+  assert len(checkpoint_files) >= 3, 'checkpoints are messed up'
 
+# first file is model A, second file is model B, third file is saved config
 if checkpoint_available:
-  current_checkpoint = sorted(checkpoint_files, reverse=True)[:2]
+  current_checkpoint = sorted(checkpoint_files, reverse=True)[:3]
   current_checkpoint = map(lambda x: os.path.join(drive_prefix, drive_checkpoint_dir, x), current_checkpoint)
 
 
@@ -494,7 +496,7 @@ if args.do_train:
     old_ppl = -float('Inf')
 
     for ep in range(args.num_train_epochs):
-
+        step = 0
         "Training"
         pbar = progress_bar(train_dataloader)
         model_A.train()
@@ -525,7 +527,8 @@ if args.do_train:
 
                 # show progress
                 pbar.set_postfix(loss=record_loss, perplexity=perplexity)
-                
+            step += 1
+            if step 
         end = time.time()
         print("Train time:", end-start)
 
