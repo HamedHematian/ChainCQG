@@ -112,7 +112,7 @@ val_data = torch.load(val_dataset_dir)
 test_data = torch.load(test_dataset_dir)
 
 # drive prefix 
-drive_prefix = '../drive/MyDrive/CQG/'
+drive_prefix = 'drive/MyDrive/CQG/'
 drive_checkpoint_dir = 'Checkpoint/'
 drive_log_dir = 'Log/'
 prediction_file_prefix = os.path.join(drive_prefix, drive_log_dir, 'prediction_')
@@ -161,6 +161,14 @@ def load_checkpoint():
             checkpoint_config['step'],
             checkpoint_config['optimizer_dict'],
             checkpoint_config['scheduler_dict'])
+
+def clean_checkpoints():
+    if len(checkpoint_files) >= max_checkpoint_to_keep * 3:
+        checkpoint_to_delete = sorted(checkpoint_files)[:3]
+        checkpoint_to_delete = map(lambda x: os.path.join(drive_prefix, drive_checkpoint_dir, x), checkpoint_to_delete)
+        os.remove(checkpoint_to_delete[0])
+        os.remove(checkpoint_to_delete[1])
+        os.remove(checkpoint_to_delete[2])
 
 
 def save_loss(epoch, step, loss):
@@ -568,10 +576,11 @@ if args.do_train:
                 pbar.set_postfix(loss=record_loss, perplexity=perplexity)
             start_step += 1
             if (start_step + 1) % save_each_k_samples == 0:
+                clean_checkpoints()
                 save_checkpoint()
                 print('------------ Checkpoint Saved ------------')
             if (start_step + 1) % log_each_k_samples == 0:
-                save_loss(ep, start_step + 1, sum(loss_collection) / len(loss_collection))
+                save_loss(ep, start_step, sum(loss_collection) / len(loss_collection))
                 loss_collection = []
         end = time.time()
         print("Train time:", end-start)
