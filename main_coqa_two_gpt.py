@@ -1,4 +1,6 @@
 import os
+from random import random
+import random as rand
 import time
 import numpy as np
 import pandas as pd
@@ -93,7 +95,7 @@ parser.add_argument("--fp16",
                     action="store_true")
 
 args = parser.parse_args()
-
+rand.seed(args.random_seed)
 set_seed(args.random_seed)
 
 
@@ -113,8 +115,11 @@ test_data = torch.load(test_dataset_dir)
 drive_prefix = 'drive/MyDrive/CQG/'
 drive_checkpoint_dir = 'Checkpoint/'
 drive_log_dir = 'Log/'
+prediction_file_prefix = os.path.join(drive_prefix, drive_log_dir, 'prediction_')
 max_checkpoint_to_keep = 3
 save_each_k_samples = 20000
+log_each_k_samples = 1000
+loss_collection = []
 
 # check if drive is accessible
 try:
@@ -128,29 +133,61 @@ except:
 checkpoint_files = os.listdir(os.path.join(drive_prefix, drive_checkpoint_dir))
 if len(checkpoint_files) == 0:
   checkpoint_available = False
-  print('No Checkpoint Found, Training from Begining')
+  print('No checkpoint found, training from begining')
 else:
   checkpoint_available = True
-  assert len(checkpoint_files) >= 3, 'checkpoints are messed up'
+  assert len(checkpoint_files) >= 3, 'Checkpoints are messed up'
 
 # first file is model A, second file is model B, third file is saved config
 if checkpoint_available:
   current_checkpoint = sorted(checkpoint_files, reverse=True)[:3]
   current_checkpoint = map(lambda x: os.path.join(drive_prefix, drive_checkpoint_dir, x), current_checkpoint)
 
+def save_checkpoint(epoch ,step):
+    filename_prefix = os.path.join(drive_prefix, drive_checkpoint_dir, f'checkpoint_{epoch}_{step}_')
+    checkpoint_config = {
+    'epoch': epoch,
+    'step': step,
+    'optimizer_dcit': optimizer.state_dict(),
+    'scheduler_dict': scheduler.state_dict()}
+    torch.save(model_A.state_dict(), filename_prefix+ '1')
+    torch.save(model_B.state_dict(), filename_prefix + '2')
+    torch.save(checkpoint_config, filename_prefix+ '3')
+
+def load_checkpoint():
+    # models have been loaded before so no need to load them again
+    checkpoint_config = torch.load(current_checkpoint[2])
+    return (checkpoint_config['epoch'],
+            checkpoint_config['step'],
+            checkpoint_config['optimizer_dict'],
+            checkpoint_config['scheduler_dict'])
+
+
+def save_loss(epoch, step, loss):
+    with open(os.path.join(drive_prefix, drive_log_dir, 'loss.txt'), 'a') as f:
+        f.write(f'EPOCH {epoch} | STEP {step} | CUMULATIVE LOSS {loss}')
+
+if checkpoint_available:
+    start_epoch, start_step, optimizer_state_dict, scheduler_state_dict = load_checkpoint()
+else:
+    start_epoch, start_step = 0, 0
+
 
 class TwoGPTDataset(Dataset):
-    def __init__(self, data):
+    def __init__(self, data, saved_index=0):
         self.data = data
+        self.new_data = copy.deepcopy(self.data)
+        rand.shuffle(self.new_data)
+        self.new_data = self.new_data[saved_index:]
         
         self.__process__()
         
     def __len__(self):
-        return len(self.data)
+        return len(self.new_data)
     
     def __process__(self):
         self.processed_data = []
-        for one in self.data:
+        for one in self.new_data:
             one_dial_tokens = one
             one_role_ids = [idx%2 for idx in range(len(one_dial_tokens))]
             self.processed_data.append([one_role_ids, one_dial_tokens])
@@ -164,12 +201,12 @@ class TwoGPTDataset(Dataset):
     def collate(self, unpacked_data):
         return unpacked_data
 
-train_dataset = TwoGPTDataset(train_data)
+train_dataset = TwoGPTDataset(train_data, start_step * args.batch_size)
 val_dataset = TwoGPTDataset(val_data)
 test_dataset = TwoGPTDataset(test_data)
 
 train_dataloader = DataLoader(dataset=train_dataset, 
-                              shuffle=True, 
+                              shuffle=False, 
                               batch_size=args.batch_size,
                               collate_fn=train_dataset.collate)
 
@@ -438,6 +475,7 @@ def predict(dataloader):
 
     return results
 
+
 if args.do_train:
     
     criterion = SequenceCrossEntropyLoss()
@@ -468,6 +506,7 @@ if args.do_train:
     with open(config_loc, "w") as f:
         json.dump(config, f, indent=4)
 
+
     # define hyper-parameters
     num_train_optimization_steps = num_train_optimization_steps = len(train_dataset) * args.num_train_epochs // args.batch_size // args.gradient_accumulation_steps
 
@@ -487,6 +526,10 @@ if args.do_train:
                                                 num_warmup_steps=args.warmup_steps,
                                                 num_training_steps=num_train_optimization_steps)
 
+    # ckeck if checkpoint is available
+    if checkpoint_available:
+        optimizer.load_state_dict(optimizer_state_dict)
+        scheduler.load_state_dict(scheduler_state_dict)
 
     os.makedirs("models", exist_ok=True)
 
@@ -495,8 +538,7 @@ if args.do_train:
     progress_bar = tqdm.tqdm
     old_ppl = -float('Inf')
 
-    for ep in range(args.num_train_epochs):
-        step = 0
+    for ep in range(start_epoch, args.num_train_epochs):
         "Training"
         pbar = progress_bar(train_dataloader)
         model_A.train()
@@ -507,16 +549,13 @@ if args.do_train:
         for batch in pbar:
             batch = batch[0]
 
-            # without relative position, we skip dialogs
-            #
-            # if sum([len(item) for item in batch[1]]) > 1024:
-            #   continue
 
             if sum([len(item) for item in batch[1]]) > 1024:
+                start_step += 1
                 continue
 
             record_loss, perplexity = train_one_iter(batch, update_count, fp16=args.fp16)
-
+            loss_collection.append(record_loss)
             update_count += 1
 
             if update_count % args.gradient_accumulation_steps == args.gradient_accumulation_steps - 1:
@@ -527,32 +566,41 @@ if args.do_train:
 
                 # show progress
                 pbar.set_postfix(loss=record_loss, perplexity=perplexity)
-            step += 1
-            if step 
+            start_step += 1
+            if (start_step + 1) % save_each_k_samples == 0:
+                save_checkpoint()
+                print('------------ Checkpoint Saved ------------')
+            if (start_step + 1) % log_each_k_samples == 0:
+                save_loss(ep, start_step, sum(loss_collection) / len(loss_collection))
+                loss_collection = []
         end = time.time()
         print("Train time:", end-start)
 
         "Evaluation"
         model_A.eval()
         model_B.eval()
-        ppl = validate(val_dataloader)
+        print('------------------- Making Predictions -------------------')
+        results = predict(test_dataloader)
+        # prediction_file = os.path.join(args.checkpoint_dir, "predictions.json")
+        prediction_file = prediction_file_prefix + f'{ep}.json'
+        print("saving result at {}.".format(prediction_file))
+        with open(prediction_file, "w") as fout:
+            json.dump(results, fout, indent=4)
 
-        # save the model for later use
-        filepath = os.path.join(args.checkpoint_dir, f"model_iter_{update_count}.pth")
-        torch.save([model_A.state_dict(), model_B.state_dict()], filepath)
-        print("saving at {}".format(filepath))
+        # ppl = validate(val_dataloader)
+
         
-if args.do_predict:
-    if not args.do_train:
-        model_files = [f for f in os.listdir(args.checkpoint_dir) if f.startswith("model_iter_")]
-        model_file = os.path.join(args.checkpoint_dir, sorted(model_files, reverse=True)[0])
+# if args.do_predict:
+#     if not args.do_train:
+#         model_files = [f for f in os.listdir(args.checkpoint_dir) if f.startswith("model_iter_")]
+#         model_file = os.path.join(args.checkpoint_dir, sorted(model_files, reverse=True)[0])
 
-        [model_A_state, model_B_state] = torch.load(model_file)
-        model_A.load_state_dict(model_A_state)
-        model_B.load_state_dict(model_B_state)
+#         [model_A_state, model_B_state] = torch.load(model_file)
+#         model_A.load_state_dict(model_A_state)
+#         model_B.load_state_dict(model_B_state)
     
-    results = predict(test_dataloader)
-    prediction_file = os.path.join(args.checkpoint_dir, "predictions.json")
-    print("saving result at {}.".format(prediction_file))
-    with open(prediction_file, "w") as fout:
-        json.dump(results, fout, indent=4)
+#     results = predict(test_dataloader)
+#     # prediction_file = os.path.join(args.checkpoint_dir, "predictions.json")
+#     print("saving result at {}.".format(prediction_file))
+#     with open(prediction_file, "w") as fout:
+#         json.dump(results, fout, indent=4)
