@@ -580,7 +580,7 @@ if args.do_train:
                 save_checkpoint(ep, start_step + 1)
                 print('------------ Checkpoint Saved ------------')
             if (start_step + 1) % log_each_k_samples == 0:
-                save_loss(ep, start_step, sum(loss_collection) / len(loss_collection))
+                save_loss(ep, start_step + 1, sum(loss_collection) / len(loss_collection))
                 loss_collection = []
         end = time.time()
         print("Train time:", end-start)
