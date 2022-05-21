@@ -577,7 +577,7 @@ if args.do_train:
             start_step += 1
             if (start_step + 1) % save_each_k_samples == 0:
                 clean_checkpoints()
-                save_checkpoint(ep, start_step)
+                save_checkpoint(ep, start_step + 1)
                 print('------------ Checkpoint Saved ------------')
             if (start_step + 1) % log_each_k_samples == 0:
                 save_loss(ep, start_step, sum(loss_collection) / len(loss_collection))
