@@ -112,7 +112,7 @@ val_data = torch.load(val_dataset_dir)
 test_data = torch.load(test_dataset_dir)
 
 # drive prefix 
-drive_prefix = 'drive/MyDrive/CQG/'
+drive_prefix = '../drive/MyDrive/CQG/'
 drive_checkpoint_dir = 'Checkpoint/'
 drive_log_dir = 'Log/'
 prediction_file_prefix = os.path.join(drive_prefix, drive_log_dir, 'prediction_')
@@ -577,7 +577,7 @@ if args.do_train:
             start_step += 1
             if (start_step + 1) % save_each_k_samples == 0:
                 clean_checkpoints()
-                save_checkpoint()
+                save_checkpoint(ep, start_step)
                 print('------------ Checkpoint Saved ------------')
             if (start_step + 1) % log_each_k_samples == 0:
                 save_loss(ep, start_step, sum(loss_collection) / len(loss_collection))
