@@ -140,15 +140,15 @@ else:
 
 # first file is model A, second file is model B, third file is saved config
 if checkpoint_available:
-  current_checkpoint = sorted(checkpoint_files, reverse=True)[:3]
-  current_checkpoint = map(lambda x: os.path.join(drive_prefix, drive_checkpoint_dir, x), current_checkpoint)
+  current_checkpoint = sorted(checkpoint_files, key=lambda x: int(x.split('_')[2]))[-3:]
+  current_checkpoint = list(map(lambda x: os.path.join(drive_prefix, drive_checkpoint_dir, x), current_checkpoint))
 
 def save_checkpoint(epoch ,step):
     filename_prefix = os.path.join(drive_prefix, drive_checkpoint_dir, f'checkpoint_{epoch}_{step}_')
     checkpoint_config = {
     'epoch': epoch,
     'step': step,
-    'optimizer_dcit': optimizer.state_dict(),
+    'optimizer_dict': optimizer.state_dict(),
     'scheduler_dict': scheduler.state_dict()}
     torch.save(model_A.state_dict(), filename_prefix+ '1')
     torch.save(model_B.state_dict(), filename_prefix + '2')
@@ -164,8 +164,8 @@ def load_checkpoint():
 
 def clean_checkpoints():
     if len(checkpoint_files) >= max_checkpoint_to_keep * 3:
-        checkpoint_to_delete = sorted(checkpoint_files)[:3]
-        checkpoint_to_delete = map(lambda x: os.path.join(drive_prefix, drive_checkpoint_dir, x), checkpoint_to_delete)
+        checkpoint_to_delete = sorted(checkpoint_files, key=lambda x: int(x.split('_')[2]))[:3]
+        checkpoint_to_delete = list(map(lambda x: os.path.join(drive_prefix, drive_checkpoint_dir, x), checkpoint_to_delete))
         os.remove(checkpoint_to_delete[0])
         os.remove(checkpoint_to_delete[1])
         os.remove(checkpoint_to_delete[2])
