@@ -117,7 +117,7 @@ drive_checkpoint_dir = 'Checkpoint/'
 drive_log_dir = 'Log/'
 prediction_file_prefix = os.path.join(drive_prefix, drive_log_dir, 'prediction_')
 max_checkpoint_to_keep = 3
-save_each_k_samples = 20000
+save_each_k_samples = 8000
 log_each_k_samples = 1000
 loss_collection = []
 
