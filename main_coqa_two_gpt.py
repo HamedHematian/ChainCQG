@@ -112,7 +112,7 @@ val_data = torch.load(val_dataset_dir)
 test_data = torch.load(test_dataset_dir)
 
 # drive prefix 
-drive_prefix = '../drive/MyDrive/CQG/'
+drive_prefix = 'CQG_Meta/'
 drive_checkpoint_dir = 'Checkpoint/'
 drive_log_dir = 'Log/'
 prediction_file_prefix = os.path.join(drive_prefix, drive_log_dir, 'prediction_')
@@ -120,29 +120,28 @@ max_checkpoint_to_keep = 3
 save_each_k_samples = 8000
 log_each_k_samples = 1000
 loss_collection = []
-checkpoint_available = False
 
 # check if drive is accessible
-# try:
-#    with open(os.path.join(drive_prefix, drive_log_dir, 'test.txt'), 'r') as f:
-#       pass
-# except:
-#   print('No Access to Drive')
-#   exit()
+try:
+   with open(os.path.join(drive_prefix, drive_log_dir, 'test.txt'), 'r') as f:
+      pass
+except:
+  print('No Access to Drive')
+  exit()
 
 # check the checkpoints drive
-# checkpoint_files = os.listdir(os.path.join(drive_prefix, drive_checkpoint_dir))
-# if len(checkpoint_files) == 0:
-#   checkpoint_available = False
-#   print('No checkpoint found, training from begining')
-# else:
-#   checkpoint_available = True
-#   assert len(checkpoint_files) >= 3, 'Checkpoints are messed up'
+checkpoint_files = os.listdir(os.path.join(drive_prefix, drive_checkpoint_dir))
+if len(checkpoint_files) == 0:
+  checkpoint_available = False
+  print('No checkpoint found, training from begining')
+else:
+  checkpoint_available = True
+  assert len(checkpoint_files) >= 3, 'Checkpoints are messed up'
 
 # # first file is model A, second file is model B, third file is saved config
-# if checkpoint_available:
-#   current_checkpoint = sorted(checkpoint_files, key=lambda x: int(x.split('_')[2]))[-3:]
-#   current_checkpoint = list(map(lambda x: os.path.join(drive_prefix, drive_checkpoint_dir, x), current_checkpoint))
+if checkpoint_available:
+  current_checkpoint = sorted(checkpoint_files, key=lambda x: int(x.split('_')[2]))[-3:]
+  current_checkpoint = list(map(lambda x: os.path.join(drive_prefix, drive_checkpoint_dir, x), current_checkpoint))
 
 def save_checkpoint(epoch ,step):
     filename_prefix = os.path.join(drive_prefix, drive_checkpoint_dir, f'checkpoint_{epoch}_{step}_')
@@ -167,7 +166,7 @@ def clean_checkpoints():
     if len(checkpoint_files) >= max_checkpoint_to_keep * 3:
         checkpoint_to_delete = sorted(checkpoint_files, key=lambda x: int(x.split('_')[2]))[:3]
         checkpoint_to_delete = list(map(lambda x: os.path.join(drive_prefix, drive_checkpoint_dir, x), checkpoint_to_delete))
-        os.remove(checkpoint_to_delete[0])cheduler_dict'])
+        os.remove(checkpoint_to_delete[0])
 
 
 
