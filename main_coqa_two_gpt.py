@@ -608,7 +608,7 @@ if args.do_predict
   print('------------------- Making Predictions -------------------')
   results = predict(test_dataloader)
   # prediction_file = os.path.join(args.checkpoint_dir, "predictions.json")
-  prediction_file = prediction_file_prefix + f'{ep}.json'
+  prediction_file = prediction_file_prefix + f'.json'
   print("saving result at {}.".format(prediction_file))
   with open(prediction_file, "w") as fout:
       json.dump(results, fout, indent=4)
