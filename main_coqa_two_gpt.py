@@ -601,6 +601,9 @@ if args.do_train:
                 loss_collection = []
         end = time.time()
         print("Train time:", end-start)
+        
+if args.do_valid:
+  validate(val_dataset)
 
 if args.do_predict
   model_A.eval()
