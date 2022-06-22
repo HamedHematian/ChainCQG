@@ -112,7 +112,7 @@ val_data = torch.load(val_dataset_dir)
 test_data = torch.load(test_dataset_dir)
 
 # drive prefix 
-drive_prefix = 'CQG_Meta/'
+drive_prefix = '../drive/MyDrive/CQG/'
 drive_checkpoint_dir = 'Checkpoint/'
 drive_log_dir = 'Log/'
 prediction_file_prefix = os.path.join(drive_prefix, drive_log_dir, 'prediction_')
@@ -141,6 +141,8 @@ else:
 # # first file is model A, second file is model B, third file is saved config
 if checkpoint_available:
   current_checkpoint = sorted(checkpoint_files, key=lambda x: int(x.split('_')[2]))[-3:]
+  current_checkpoint = sorted(current_checkpoint)
+  print('checkpoints to load ', current_checkpoint)
   current_checkpoint = list(map(lambda x: os.path.join(drive_prefix, drive_checkpoint_dir, x), current_checkpoint))
 
 def save_checkpoint(epoch ,step):
@@ -182,6 +184,7 @@ def clean_checkpoints():
 def save_loss(epoch, step, loss):
     with open(os.path.join(drive_prefix, drive_log_dir, 'loss.txt'), 'a') as f:
         f.write(f'EPOCH {epoch} | STEP {step} | CUMULATIVE LOSS {loss}')
+        f.write('\n')
 
 if checkpoint_available:
     start_epoch, start_step, optimizer_state_dict, scheduler_state_dict = load_checkpoint()
@@ -556,6 +559,12 @@ if args.do_train:
 
     for ep in range(start_epoch, args.num_train_epochs):
         "Training"
+        if ep != start_epoch:
+          train_dataset = TwoGPTDataset(train_data, 0)
+          train_dataloader = DataLoader(dataset=train_dataset, 
+                              shuffle=False, 
+                              batch_size=args.batch_size,
+                              collate_fn=train_dataset.collate)
         pbar = progress_bar(train_dataloader)
         model_A.train()
         model_B.train()
@@ -593,18 +602,17 @@ if args.do_train:
         end = time.time()
         print("Train time:", end-start)
 
-        "Evaluation"
-        model_A.eval()
-        model_B.eval()
-        print('------------------- Making Predictions -------------------')
-        results = predict(test_dataloader)
-        # prediction_file = os.path.join(args.checkpoint_dir, "predictions.json")
-        prediction_file = prediction_file_prefix + f'{ep}.json'
-        print("saving result at {}.".format(prediction_file))
-        with open(prediction_file, "w") as fout:
-            json.dump(results, fout, indent=4)
+if args.do_predict
+  model_A.eval()
+  model_B.eval()
+  print('------------------- Making Predictions -------------------')
+  results = predict(test_dataloader)
+  # prediction_file = os.path.join(args.checkpoint_dir, "predictions.json")
+  prediction_file = prediction_file_prefix + f'{ep}.json'
+  print("saving result at {}.".format(prediction_file))
+  with open(prediction_file, "w") as fout:
+      json.dump(results, fout, indent=4)
 
-        # ppl = validate(val_dataloader)
 
         
 # if args.do_predict:
