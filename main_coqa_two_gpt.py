@@ -560,7 +560,8 @@ if args.do_train:
     for ep in range(start_epoch, args.num_train_epochs):
         "Training"
         if ep != start_epoch:
-          train_dataset = TwoGPTDataset(train_data, 0)
+          start_step = 0
+          train_dataset = TwoGPTDataset(train_data, start_step)
           train_dataloader = DataLoader(dataset=train_dataset, 
                               shuffle=False, 
                               batch_size=args.batch_size,
