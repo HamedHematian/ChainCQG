@@ -19,7 +19,7 @@ print("Rouge-1:", round(score["rougeL"].mid.fmeasure * 100, 2))
 print("Rouge-L:", round(score["rougeL"].mid.fmeasure * 100, 2))
 
 score = meteor.compute(predictions=predictions, references=references)
-print("Meteor:", round(score * 100, 2))
+print("Meteor:", round(score["meteor"] * 100, 2))
 
 score = bleu.compute(predictions=predictions, references=references, max_order=4, smooth=True)
-print("BLEU-4:", round(score * 100, 2))
+print("BLEU-4:", round(score["bleu"] * 100, 2))
