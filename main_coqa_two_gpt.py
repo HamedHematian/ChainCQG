@@ -120,6 +120,7 @@ max_checkpoint_to_keep = 3
 save_each_k_samples = 8000
 log_each_k_samples = 1000
 loss_collection = []
+perplexity_collection = []
 
 # check if drive is accessible
 try:
@@ -183,7 +184,12 @@ def clean_checkpoints():
 
 def save_loss(epoch, step, loss):
     with open(os.path.join(drive_prefix, drive_log_dir, 'loss.txt'), 'a') as f:
-        f.write(f'EPOCH {epoch} | STEP {step} | CUMULATIVE LOSS {loss}')
+        f.write(f'EPOCH {epoch} | STEP {step} | LOSS {loss}')
+        f.write('\n')
+        
+def save_perplexity(epoch, step, perplexity):
+    with open(os.path.join(drive_prefix, drive_log_dir, 'perplexity.txt'), 'a') as f:
+        f.write(f'EPOCH {epoch} | STEP {step} | PERPLEXITY {perplexity}')
         f.write('\n')
 
 if checkpoint_available:
@@ -582,6 +588,7 @@ if args.do_train:
 
             record_loss, perplexity = train_one_iter(batch, update_count, fp16=args.fp16)
             loss_collection.append(record_loss)
+            perplexity_collection.append(perplexity)
             update_count += 1
 
             if update_count % args.gradient_accumulation_steps == args.gradient_accumulation_steps - 1:
@@ -599,7 +606,9 @@ if args.do_train:
                 print('------------ Checkpoint Saved ------------')
             if (start_step + 1) % log_each_k_samples == 0:
                 save_loss(ep, start_step + 1, sum(loss_collection) / len(loss_collection))
+                save_perplexity(ep, start_step + 1, sum(perplexity_collection) / len(perplexity_collection))
                 loss_collection = []
+                perplexity_collection = []
         end = time.time()
         print("Train time:", end-start)
         
