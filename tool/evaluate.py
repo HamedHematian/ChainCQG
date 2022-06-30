@@ -32,7 +32,7 @@ def compute_scores(filename, epoch):
     out_txt += f'Rouge-1:{round(score["rouge1"].mid.fmeasure * 100, 2)}\n'
     out_txt += f'Rouge-L:{round(score["rougeL"].mid.fmeasure * 100, 2)}\n'
     out_txt += f'Meteor:{round(score["meteor"] * 100, 2)}\n'
-    out_txt += f'BLEU-4:{round(score["bleu"] * 100, 2))}\n'
+    out_txt += f'BLEU-4:{round(score["bleu"] * 100, 2)}\n'
     
     with open(outfile, 'a') as f:
         f.write('-------- EPOCH {} Evaluation --------\n')
