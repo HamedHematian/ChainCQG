@@ -7,7 +7,6 @@ def compute_scores(filename, epoch):
     
     dir = '../drive/MyDrive/CQG/Log/'
     out_file = '../drive/MyDrive/CQG/Log/scores.txt'
-    filename = os.path.join(dir, filename)
     with open(filename, "r") as reader:
         items = json.load(reader)
         for item in items:
