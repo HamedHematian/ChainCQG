@@ -627,7 +627,7 @@ if args.do_predict
   print("saving result at {}.".format(prediction_file))
   with open(prediction_file, "w") as fout:
       json.dump(results, fout, indent=4)
-  compute_scores(prediction_file)
+  compute_scores(prediction_file, ep)
 
 
         
