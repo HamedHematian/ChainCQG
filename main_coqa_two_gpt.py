@@ -13,6 +13,7 @@ from torchsummary import summary as summary
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils.rnn import pad_sequence
+from tool import evaluate
 
 from transformers import GPT2LMHeadModel, GPT2Tokenizer, AdamW, get_linear_schedule_with_warmup, set_seed
 
@@ -621,10 +622,12 @@ if args.do_predict
   print('------------------- Making Predictions -------------------')
   results = predict(test_dataloader)
   # prediction_file = os.path.join(args.checkpoint_dir, "predictions.json")
-  prediction_file = prediction_file_prefix + f'.json'
+  prediction_file = f'pred_{ep}.json'
+  prediction_file = os.path.join(prediction_file_prefix, prediction_file)
   print("saving result at {}.".format(prediction_file))
   with open(prediction_file, "w") as fout:
       json.dump(results, fout, indent=4)
+  compute_scores(prediction_file)
 
 
         
